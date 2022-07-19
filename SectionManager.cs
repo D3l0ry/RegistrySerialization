@@ -3,43 +3,21 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using System.Xml.Serialization;
 
 namespace Microsoft.Win32.Serialization
 {
-    public class SectionManager : IDisposable
+    internal class SectionManager : IDisposable
     {
         private readonly Type mr_ObjectType;
         private readonly string mr_SectionName;
 
-        private readonly Dictionary<FieldInfo, SectionManager> mr_ObjectFields;
-
         private readonly RegistryKey mr_MainSection;
+        private RegistryKey m_CurrentSection;
 
-        private readonly RegistryKey mr_CurrentSection;
+        private readonly PropertyInfo[] mr_ObjectFields;
 
         public SectionManager(Type sectionType, RegistryKey mainSection)
-        {
-            if(sectionType is null)
-            {
-                throw new ArgumentNullException(nameof(sectionType));
-            }
-            
-            if(mainSection is null)
-            {
-                throw new ArgumentNullException(nameof(mainSection));
-            }
-
-            mr_ObjectType = sectionType;
-            mr_MainSection = mainSection;
-
-            mr_SectionName = mr_ObjectType.Name;
-
-            mr_CurrentSection = mr_MainSection.CreateSubKey(mr_SectionName);
-
-            mr_ObjectFields = GetObjectFields();
-        }
-
-        private SectionManager(string sectionName, Type sectionType, RegistryKey mainSection)
         {
             if (sectionType is null)
             {
@@ -52,93 +30,106 @@ namespace Microsoft.Win32.Serialization
             }
 
             mr_ObjectType = sectionType;
-            mr_SectionName = sectionName;
-
             mr_MainSection = mainSection;
 
-            mr_CurrentSection = mr_MainSection.CreateSubKey(mr_SectionName);
+            mr_SectionName = sectionType.Name;
 
-            mr_ObjectFields = GetObjectFields();
+            mr_ObjectFields = sectionType
+                .GetProperties()
+                .Where(currentField => !currentField.CustomAttributes.Any(currentAttribute => currentAttribute.AttributeType == typeof(NonSerializedAttribute)))
+                .ToArray();
         }
 
-        private Dictionary<FieldInfo, SectionManager> GetObjectFields()
+        private SectionManager(string sectionName, Type sectionType, RegistryKey mainSection) : this(sectionType, mainSection) => mr_SectionName = sectionName;
+
+        public object GetSection()
         {
-            Dictionary<FieldInfo, SectionManager> currentFields = new Dictionary<FieldInfo, SectionManager>();
+            m_CurrentSection = mr_MainSection.OpenSubKey(mr_SectionName);
 
-            FieldInfo[] fields = mr_ObjectType.GetFields();
-
-            foreach(FieldInfo currentField in fields)
+            if(m_CurrentSection is null)
             {
-                bool isNonSerialized = currentField.CustomAttributes.Any(currentAttribute => currentAttribute.AttributeType == typeof(NonSerializedAttribute));
+                return null;
+            }
 
-                if(isNonSerialized)
-                {
-                    continue;
-                }
+            object newObject = Activator.CreateInstance(mr_ObjectType);
 
-                if(currentField.FieldType == mr_ObjectType)
-                {
-                    throw new SystemException("Применение саб-секции с тем же типом, что и главная секция, вызовет рекурсию!");
-                }
-
-                bool isSubSection = currentField.CustomAttributes.Any(currentAttribute => currentAttribute.AttributeType == typeof(RegistrySubSectionAttribute));
+            foreach (PropertyInfo currentProperty in mr_ObjectFields)
+            {
+                bool isSubSection = currentProperty.CustomAttributes.Any(currentAttribute => currentAttribute.AttributeType == typeof(RegistrySubSectionAttribute));
 
                 if (isSubSection)
                 {
-                    currentFields.Add(currentField,new SectionManager(currentField.Name, currentField.FieldType, mr_CurrentSection));
+                    SectionManager sectionManager = new SectionManager(currentProperty.Name, currentProperty.PropertyType, m_CurrentSection);
+
+                    object subSectionObject = sectionManager.GetSection();
+
+                    currentProperty.SetValue(newObject, subSectionObject);
 
                     continue;
                 }
 
-                currentFields.Add(currentField, null);
+                object registryFieldValue = m_CurrentSection.GetValue(currentProperty.Name);
+
+                if (registryFieldValue is null)
+                {
+                    continue;
+                }
+
+                currentProperty.SetValue(newObject, registryFieldValue);
             }
 
-            return currentFields;
+            return newObject;
         }
 
         public void Update(object value)
         {
-            if (value.GetType() != mr_ObjectType)
+            if (value is null)
             {
-                throw new ArgumentException("Данный тип не является настоящим типом секции!");
+                throw new ArgumentNullException(nameof(value));
             }
 
-            foreach(KeyValuePair<FieldInfo, SectionManager> currentFieldValuePair in mr_ObjectFields)
-            {
-                object fieldValue = currentFieldValuePair.Key.GetValue(value);
+            Type valueType = value.GetType();
 
-                if(fieldValue is null)
+            if (valueType != mr_ObjectType)
+            {
+                throw new ArgumentException("Данный тип не соответствует типу секции");
+            }
+
+            m_CurrentSection = mr_MainSection.CreateSubKey(mr_SectionName);
+
+            foreach (PropertyInfo currentProperty in mr_ObjectFields)
+            {
+                object fieldValue = currentProperty.GetValue(value);
+
+                if (fieldValue is null)
                 {
                     continue;
                 }
 
-                if (currentFieldValuePair.Value is null)
+                bool isSubSection = currentProperty.CustomAttributes.Any(currentAttribute => currentAttribute.AttributeType == typeof(RegistrySubSectionAttribute));
+
+                if (isSubSection)
                 {
-                    mr_CurrentSection.SetValue(currentFieldValuePair.Key.Name, fieldValue);
+                    if(currentProperty.PropertyType == valueType)
+                    {
+                        throw new InvalidCastException($"Подраздел реестра с типом {currentProperty} является родительским типом, который вызовет рекурсию");
+                    }
+
+                    SectionManager fieldSectionManager = new SectionManager(currentProperty.Name, currentProperty.PropertyType, m_CurrentSection);
+
+                    fieldSectionManager.Update(fieldValue);
 
                     continue;
                 }
 
-                currentFieldValuePair.Value.Update(fieldValue);
+                m_CurrentSection.SetValue(currentProperty.Name, fieldValue);
             }
-
-            mr_CurrentSection.Flush();
-        }
-
-        public SectionManager GetSubSection(string subSectonName)
-        {
-            if(string.IsNullOrWhiteSpace(subSectonName))
-            {
-                throw new ArgumentNullException(nameof(subSectonName));
-            }
-
-            return mr_ObjectFields.Values.First(currentSubSection => currentSubSection.mr_SectionName == subSectonName);
         }
 
         public void Dispose()
         {
             mr_MainSection.Close();
-            mr_CurrentSection.Close();
+            m_CurrentSection.Close();
         }
     }
 }
