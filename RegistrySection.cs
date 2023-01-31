@@ -4,7 +4,7 @@ using System.Reflection;
 
 namespace Microsoft.Win32.Serialization
 {
-    internal class SectionManager : IDisposable
+    internal class RegistrySection : IDisposable
     {
         private readonly Type _ObjectType;
         private readonly string _SectionName;
@@ -12,7 +12,7 @@ namespace Microsoft.Win32.Serialization
         private readonly PropertyInfo[] _ObjectFields;
         private RegistryKey _CurrentSection;
 
-        public SectionManager(Type sectionType, RegistryKey mainSection)
+        public RegistrySection(Type sectionType, RegistryKey mainSection)
         {
             if (sectionType == null)
             {
@@ -30,7 +30,27 @@ namespace Microsoft.Win32.Serialization
             _ObjectFields = GetProperties(sectionType);
         }
 
-        private SectionManager(PropertyInfo property, RegistryKey mainSection) : this(property.PropertyType, mainSection) => _SectionName = property.Name;
+        public RegistrySection(Type sectionType)
+        {
+            if(sectionType == null)
+            {
+                throw new ArgumentNullException(nameof(sectionType));
+            }
+
+            if (!sectionType.IsDefined(typeof(RegistrySerializableAttribute)))
+            {
+                throw new NullReferenceException($"Аттрибут {nameof(RegistrySerializableAttribute)} не указан");
+            }
+
+            RegistrySerializableAttribute registrySerializable = sectionType.GetCustomAttribute<RegistrySerializableAttribute>();
+
+            _ObjectType = sectionType;
+            _MainSection = registrySerializable.MainSection;
+            _SectionName = sectionType.Name;
+            _ObjectFields = GetProperties(sectionType);
+        }
+
+        private RegistrySection(PropertyInfo property, RegistryKey mainSection) : this(property.PropertyType, mainSection) => _SectionName = property.Name;
 
         private static PropertyInfo[] GetProperties(Type type)
         {
@@ -41,7 +61,7 @@ namespace Microsoft.Win32.Serialization
             return properties;
         }
 
-        private static SectionManager CreateSection(PropertyInfo property, RegistryKey mainSection) => new SectionManager(property, mainSection);
+        private static RegistrySection CreateSection(PropertyInfo property, RegistryKey mainSection) => new RegistrySection(property, mainSection);
 
         public object GetSection()
         {
@@ -61,7 +81,7 @@ namespace Microsoft.Win32.Serialization
 
                 if (isSubSection)
                 {
-                    SectionManager sectionManager = CreateSection(currentProperty, _CurrentSection);
+                    RegistrySection sectionManager = CreateSection(currentProperty, _CurrentSection);
                     registryValue = sectionManager.GetSection();
 
                     sectionManager.Dispose();
@@ -110,7 +130,7 @@ namespace Microsoft.Win32.Serialization
                         throw new InvalidCastException($"Подраздел реестра с типом {currentProperty} является родительским типом, который вызовет рекурсию");
                     }
 
-                    SectionManager sectionManager = CreateSection(currentProperty, _CurrentSection);
+                    RegistrySection sectionManager = CreateSection(currentProperty, _CurrentSection);
 
                     sectionManager.Update(fieldValue);
 

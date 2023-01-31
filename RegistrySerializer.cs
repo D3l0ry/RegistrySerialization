@@ -4,7 +4,14 @@ namespace Microsoft.Win32.Serialization
 {
     public class RegistrySerializer<T> : IDisposable
     {
-        private readonly SectionManager mr_MainSectionManager;
+        private readonly RegistrySection _MainSection;
+
+        public RegistrySerializer()
+        {
+            Type objectType = typeof(T);
+
+            _MainSection = new RegistrySection(objectType);
+        }
 
         public RegistrySerializer(RegistryKey mainSection)
         {
@@ -15,13 +22,13 @@ namespace Microsoft.Win32.Serialization
                 throw new ArgumentNullException(nameof(mainSection));
             }
 
-            mr_MainSectionManager = new SectionManager(objectType, mainSection);
+            _MainSection = new RegistrySection(objectType, mainSection);
         }
 
-        public void Serialize(T value) => mr_MainSectionManager.Update(value);
+        public void Serialize(T value) => _MainSection.Update(value);
 
-        public T Deserialize() => (T)mr_MainSectionManager.GetSection();
+        public T Deserialize() => (T)_MainSection.GetSection();
 
-        public void Dispose() => mr_MainSectionManager.Dispose();
+        public void Dispose() => _MainSection.Dispose();
     }
 }
