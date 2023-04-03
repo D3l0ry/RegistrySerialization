@@ -5,11 +5,11 @@ using System.Text;
 namespace Microsoft.Win32.Serialization
 {
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
-    public class RegistryFieldConvertAttribute : Attribute
+    public class RegistryPropertyConvertAttribute : Attribute
     {
         internal Type ConvertType { get; private set; }
 
-        public RegistryFieldConvertAttribute(Type convertType)
+        public RegistryPropertyConvertAttribute(Type convertType)
         {
             if(convertType == null)
             {

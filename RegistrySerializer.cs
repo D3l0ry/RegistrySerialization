@@ -17,7 +17,7 @@ namespace Microsoft.Win32.Serialization
         {
             Type objectType = typeof(T);
 
-            if (mainSection is null)
+            if (mainSection == null)
             {
                 throw new ArgumentNullException(nameof(mainSection));
             }

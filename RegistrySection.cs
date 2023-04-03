@@ -9,8 +9,27 @@ namespace Microsoft.Win32.Serialization
         private readonly Type _ObjectType;
         private readonly string _SectionName;
         private readonly RegistryKey _MainSection;
-        private readonly PropertyInfo[] _ObjectFields;
-        private RegistryKey _CurrentSection;
+        private readonly PropertyInfo[] _ObjectProperties;
+
+        public RegistrySection(Type sectionType)
+        {
+            if (sectionType == null)
+            {
+                throw new ArgumentNullException(nameof(sectionType));
+            }
+
+            if (!sectionType.IsDefined(typeof(RegistrySerializableAttribute)))
+            {
+                throw new NullReferenceException($"Аттрибут {nameof(RegistrySerializableAttribute)} не указан");
+            }
+
+            RegistrySerializableAttribute registrySerializable = sectionType.GetCustomAttribute<RegistrySerializableAttribute>();
+
+            _ObjectType = sectionType;
+            _MainSection = registrySerializable.MainSection;
+            _SectionName = sectionType.Name;
+            _ObjectProperties = GetProperties(sectionType);
+        }
 
         public RegistrySection(Type sectionType, RegistryKey mainSection)
         {
@@ -27,30 +46,13 @@ namespace Microsoft.Win32.Serialization
             _ObjectType = sectionType;
             _MainSection = mainSection;
             _SectionName = sectionType.Name;
-            _ObjectFields = GetProperties(sectionType);
+            _ObjectProperties = GetProperties(sectionType);
         }
 
-        public RegistrySection(Type sectionType)
+        private RegistrySection(PropertyInfo property, RegistryKey mainSection) : this(property.PropertyType, mainSection)
         {
-            if(sectionType == null)
-            {
-                throw new ArgumentNullException(nameof(sectionType));
-            }
-
-            if (!sectionType.IsDefined(typeof(RegistrySerializableAttribute)))
-            {
-                throw new NullReferenceException($"Аттрибут {nameof(RegistrySerializableAttribute)} не указан");
-            }
-
-            RegistrySerializableAttribute registrySerializable = sectionType.GetCustomAttribute<RegistrySerializableAttribute>();
-
-            _ObjectType = sectionType;
-            _MainSection = registrySerializable.MainSection;
-            _SectionName = sectionType.Name;
-            _ObjectFields = GetProperties(sectionType);
+            _SectionName = property.Name;
         }
-
-        private RegistrySection(PropertyInfo property, RegistryKey mainSection) : this(property.PropertyType, mainSection) => _SectionName = property.Name;
 
         private static PropertyInfo[] GetProperties(Type type)
         {
@@ -61,20 +63,25 @@ namespace Microsoft.Win32.Serialization
             return properties;
         }
 
-        private static object RegistryFieldValueConvert(PropertyInfo selectedProperty,object value)
+        private static object RegistryFieldValueConvert(PropertyInfo selectedProperty, object value)
         {
-            RegistryFieldConvertAttribute registryFieldConvert = selectedProperty.GetCustomAttribute<RegistryFieldConvertAttribute>();
+            RegistryPropertyConvertAttribute registryFieldConvert = selectedProperty.GetCustomAttribute<RegistryPropertyConvertAttribute>();
 
             if (registryFieldConvert == null)
             {
                 return value;
             }
 
-            ConstructorInfo constructor = selectedProperty.PropertyType.GetConstructor(new Type[] { registryFieldConvert.ConvertType });
-
-            if(constructor == null)
+            Type[] constructorArgumentsType = new[]
             {
-                throw new ArgumentException($"Конструктор с типом, указанным в {nameof(RegistryFieldConvertAttribute)}, не найден");
+                registryFieldConvert.ConvertType
+            };
+
+            ConstructorInfo constructor = selectedProperty.PropertyType.GetConstructor(constructorArgumentsType);
+
+            if (constructor == null)
+            {
+                throw new ArgumentException($"Конструктор с типом, указанным в {nameof(RegistryPropertyConvertAttribute)}, не найден");
             }
 
             return constructor.Invoke(new object[] { value });
@@ -82,31 +89,30 @@ namespace Microsoft.Win32.Serialization
 
         public object GetSection()
         {
-            _CurrentSection = _MainSection.OpenSubKey(_SectionName);
+            RegistryKey currentSection = _MainSection.OpenSubKey(_SectionName);
 
-            if (_CurrentSection == null)
+            if (currentSection == null)
             {
                 return null;
             }
 
             object newObject = Activator.CreateInstance(_ObjectType);
 
-            foreach (PropertyInfo currentProperty in _ObjectFields)
+            foreach (PropertyInfo currentProperty in _ObjectProperties)
             {
                 bool isSubSection = currentProperty.IsDefined(typeof(RegistrySubSectionAttribute));
-                RegistryFieldConvertAttribute registryFieldConverter = currentProperty.GetCustomAttribute<RegistryFieldConvertAttribute>();
                 object registryValue;
 
                 if (isSubSection)
                 {
-                    RegistrySection sectionManager = new RegistrySection(currentProperty, _CurrentSection);
-                    registryValue = sectionManager.GetSection();
+                    RegistrySection propertySection = new RegistrySection(currentProperty, currentSection);
+                    registryValue = propertySection.GetSection();
 
-                    sectionManager.Dispose();
+                    propertySection.Dispose();
                 }
                 else
                 {
-                    registryValue = _CurrentSection.GetValue(currentProperty.Name);
+                    registryValue = currentSection.GetValue(currentProperty.Name);
 
                     if (registryValue == null)
                     {
@@ -118,6 +124,8 @@ namespace Microsoft.Win32.Serialization
 
                 currentProperty.SetValue(newObject, value);
             }
+
+            currentSection.Dispose();
 
             return newObject;
         }
@@ -136,9 +144,9 @@ namespace Microsoft.Win32.Serialization
                 throw new ArgumentException("Данный тип не соответствует типу секции");
             }
 
-            _CurrentSection = _MainSection.CreateSubKey(_SectionName);
+            RegistryKey currentSection = _MainSection.CreateSubKey(_SectionName);
 
-            foreach (PropertyInfo currentProperty in _ObjectFields)
+            foreach (PropertyInfo currentProperty in _ObjectProperties)
             {
                 object fieldValue = currentProperty.GetValue(value);
                 bool isSubSection = currentProperty.IsDefined(typeof(RegistrySubSectionAttribute));
@@ -150,21 +158,22 @@ namespace Microsoft.Win32.Serialization
                         throw new InvalidCastException($"Подраздел реестра с типом {currentProperty} является родительским типом, который вызовет рекурсию");
                     }
 
-                    RegistrySection sectionManager = new RegistrySection(currentProperty, _CurrentSection);
+                    RegistrySection sectionManager = new RegistrySection(currentProperty, currentSection);
 
                     sectionManager.Update(fieldValue);
 
                     continue;
                 }
 
-                _CurrentSection.SetValue(currentProperty.Name, fieldValue);
+                currentSection.SetValue(currentProperty.Name, fieldValue);
             }
+
+            currentSection.Dispose();
         }
 
         public void Dispose()
         {
             _MainSection.Close();
-            _CurrentSection.Close();
         }
     }
 }
