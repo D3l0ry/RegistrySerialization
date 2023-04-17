@@ -1,33 +1,34 @@
 ﻿using System;
 
-namespace Microsoft.Win32.Serialization;
-
-public class RegistrySerializer<T> : IDisposable where T : class
+namespace Microsoft.Win32.Registry.Serializations
 {
-    private readonly RegistrySection _MainSection;
-
-    public RegistrySerializer()
+    public class RegistrySerializer<T> : IDisposable where T : class
     {
-        Type objectType = typeof(T);
+        private readonly RegistrySection _MainSection;
 
-        _MainSection = new RegistrySection(objectType);
-    }
-
-    public RegistrySerializer(RegistryKey mainSection)
-    {
-        Type objectType = typeof(T);
-
-        if (mainSection == null)
+        public RegistrySerializer()
         {
-            throw new ArgumentNullException(nameof(mainSection));
+            Type objectType = typeof(T);
+
+            _MainSection = new RegistrySection(objectType);
         }
 
-        _MainSection = new RegistrySection(objectType, mainSection);
+        public RegistrySerializer(RegistryKey mainSection)
+        {
+            Type objectType = typeof(T);
+
+            if (mainSection == null)
+            {
+                throw new ArgumentNullException(nameof(mainSection));
+            }
+
+            _MainSection = new RegistrySection(objectType, mainSection);
+        }
+
+        public void Serialize(T value) => _MainSection.Update(value);
+
+        public T? Deserialize() => (T?)_MainSection.GetSection();
+
+        public void Dispose() => _MainSection.Dispose();
     }
-
-    public void Serialize(T value) => _MainSection.Update(value);
-
-    public T? Deserialize() => (T?)_MainSection.GetSection();
-
-    public void Dispose() => _MainSection.Dispose();
 }

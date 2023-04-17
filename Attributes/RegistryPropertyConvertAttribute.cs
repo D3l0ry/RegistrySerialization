@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace Microsoft.Win32.Serialization
+namespace Microsoft.Win32.Registry.Serializations
 {
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
     public class RegistryPropertyConvertAttribute : Attribute
@@ -11,7 +9,7 @@ namespace Microsoft.Win32.Serialization
 
         public RegistryPropertyConvertAttribute(Type convertType)
         {
-            if(convertType == null)
+            if (convertType == null)
             {
                 throw new ArgumentNullException(nameof(convertType));
             }

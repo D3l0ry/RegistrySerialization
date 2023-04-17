@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace Microsoft.Win32.Serialization
+namespace Microsoft.Win32.Registry.Serializations
 {
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
     public class RegistrySerializableAttribute : Attribute
